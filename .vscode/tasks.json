@@ -1,0 +1,101 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build NES ROM",
+            "type": "shell",
+            "command": "${workspaceFolder}/cc65/bin/ca65",
+            "args": [
+                "${file}",
+                "-o",
+                "${fileDirname}/${fileBasenameNoExtension}.o"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Link NES ROM",
+            "type": "shell",
+            "command": "${workspaceFolder}/cc65/bin/ld65",
+            "args": [
+                "${fileDirname}/${fileBasenameNoExtension}.o",
+                "-t",
+                "nes",
+                "-v",
+                "-m",
+                "${fileDirname}/${fileBasenameNoExtension}_map.txt",
+                "-o",
+                "${fileDirname}/${fileBasenameNoExtension}.nes"
+            ],
+            "group": "build",
+            "dependsOn": "Build NES ROM",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build and Link",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Build NES ROM",
+                "Link NES ROM"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            }
+        },
+        {
+            "label": "Build and Run in Mesen",
+            "dependsOrder": "sequence",
+            "dependsOn": "Build and Link",
+            "type": "shell",
+            "command": "${workspaceFolder}/mesen/Mesen.exe",
+            "args": [
+                "${fileDirname}/${fileBasenameNoExtension}.nes"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "silent",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Clean Build",
+            "type": "shell",
+            "command": "del",
+            "args": [
+                "/Q",
+                "${workspaceFolder}\\src\\*.o",
+                "${workspaceFolder}\\src\\*.nes"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "shared"
+            },
+            "problemMatcher": []
+        }
+    ]
+}

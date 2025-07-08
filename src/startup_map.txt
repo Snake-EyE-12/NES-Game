@@ -1,0 +1,34 @@
+Modules list:
+-------------
+startup.o:
+    CODE              Offs=000000  Size=00004D  Align=00001  Fill=0000
+    HEADER            Offs=000000  Size=000008  Align=00001  Fill=0000
+    VECTORS           Offs=000000  Size=000006  Align=00001  Fill=0000
+    CHARS             Offs=000000  Size=002000  Align=00001  Fill=0000
+
+
+Segment list:
+-------------
+Name                   Start     End    Size  Align
+----------------------------------------------------
+CHARS                 000000  001FFF  002000  00001
+HEADER                000000  000007  000008  00001
+CODE                  008000  00804C  00004D  00001
+VECTORS               00FFFA  00FFFF  000006  00001
+
+
+Exports list by name:
+---------------------
+__STACKSIZE__             000300 REA    
+
+
+Exports list by value:
+----------------------
+__STACKSIZE__             000300 REA    
+
+
+Imports list:
+-------------
+__STACKSIZE__ ([linker generated]):
+    [linker generated]        C:\Users\chase\Desktop\Workspace\School\Neumont Classes\Year3\Game Engine Projects\NES\Projects\cc65\cfg/nes.cfg:27
+

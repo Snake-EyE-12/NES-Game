@@ -1,0 +1,16 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run in Mesen",
+            "type": "node",
+            "request": "launch",
+            "program": "",
+            "preLaunchTask": "Build and Link",
+            "console": "integratedTerminal",
+            "runtimeExecutable": "${workspaceFolder}/mesen/Mesen.exe",
+            "runtimeArgs": ["${workspaceFolder}/src/game.nes"],
+            "skipFiles": ["<node_internals>/**"]
+        }
+    ]
+}
