@@ -24,14 +24,14 @@ JOYPAD1             = $4016 ; Joypad 1 (Read/Write)
 JOYPAD2             = $4017 ; Joypad 2 (Read/Write)
 
 ; Gamepad bit values
-PAD_A               = $01
-PAD_B               = $02
-PAD_SELECT          = $04
-PAD_START           = $08
-PAD_U               = $10
-PAD_D               = $20
-PAD_L               = $40
-PAD_R               = $80
+PAD_A               = $80
+PAD_B               = $40
+PAD_SELECT          = $20
+PAD_START           = $10
+PAD_U               = $08
+PAD_D               = $04
+PAD_L               = $02
+PAD_R               = $01
 
 ; Useful PPU memory addresses
 NAME_TABLE_0_ADDRESS		  = $2000
@@ -39,6 +39,12 @@ ATTRIBUTE_TABLE_0_ADDRESS	= $23C0
 NAME_TABLE_1_ADDRESS		  = $2400
 ATTRIBUTE_TABLE_1_ADDRESS	= $27C0
 PALETTE_ADDRESS           = $3f00
+
+; OAM Sprite Byte Offset
+SPRITE_OFFSET_Y       = 0
+SPRITE_OFFSET_TILE    = 1
+SPRITE_OFFSET_ATTRIB  = 2
+SPRITE_OFFSET_X       = 3
 
 ; OAM Sprite Attributes
 SPRITE_PALETTE_0 = %00000000

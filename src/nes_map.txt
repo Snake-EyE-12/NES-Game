@@ -1,0 +1,26 @@
+Modules list:
+-------------
+nes.o:
+
+
+Segment list:
+-------------
+Name                   Start     End    Size  Align
+----------------------------------------------------
+
+
+Exports list by name:
+---------------------
+__STACKSIZE__             000300 REA    
+
+
+Exports list by value:
+----------------------
+__STACKSIZE__             000300 REA    
+
+
+Imports list:
+-------------
+__STACKSIZE__ ([linker generated]):
+    [linker generated]        C:\Users\chase\Desktop\Workspace\School\Neumont Classes\Year3\Game Engine Projects\NES\Projects\cc65\cfg/nes.cfg:29
+
