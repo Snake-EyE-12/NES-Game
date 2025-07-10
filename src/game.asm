@@ -102,6 +102,27 @@ oam: .res 256	; sprite OAM data
 
 ; Non-Maskable Interrupt Handler - called during VBlank
 .proc nmi_handler
+PHA
+TXA
+PHA
+TYA
+PHA
+
+INC time
+LDA time
+CMP #60
+BNE skip
+INC seconds
+LDA #0
+STA time
+
+skip:
+
+PLA
+TAY
+PLA
+TAX
+PLA
 
   RTI                     ; Return from interrupt (not using NMI yet)
 .endproc
@@ -208,6 +229,18 @@ textloop:
 .endproc
 
 .proc init_sprites
+
+  LDX #0
+  load_sprite:
+
+    LDA sprite_data, X
+    STA SPRITE_0_ADDR, X
+
+    INX
+    CPX #4
+    BNE load_sprite
+
+
   ; set sprite tiles
   LDA #1
   STA SPRITE_0_ADDR + SPRITE_OFFSET_TILE
@@ -621,6 +654,12 @@ palette_data:
 ; Load nametable data
 nametable_data:
   .incbin "assets/screen.nam"
+
+sprite_data:
+.byte 30, 1, 0, 40
+.byte 30, 2, 0, 48
+.byte 38, 3, 0, 40
+.byte 38, 4, 0, 48
 
 hello_txt:
 .byte ' ', 0
