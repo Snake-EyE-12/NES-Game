@@ -6,6 +6,9 @@ SPRITE_1_ADDR = oam + 4
 SPRITE_2_ADDR = oam + 8
 SPRITE_3_ADDR = oam + 12
 SPRITE_Ball_ADDR = oam + 16
+SPRITE_Bullet1_ADDR = oam + 20
+SPRITE_Bullet2_ADDR = oam + 24
+SPRITE_Bullet3_ADDR = oam + 28
 
 ;*****************************************************************
 ; Define NES cartridge Header
@@ -64,6 +67,8 @@ score:                  .res 1    ; Score low byte
 scroll:                 .res 1    ; Scroll screen
 time:                   .res 1    ; Time (60hz = 60 FPS)
 seconds:                .res 1    ; Seconds
+scene:                  .res 1
+start_text_drawn:       .res 1
 ;
 ball_pos_x:             .res 1
 ball_pos_y:             .res 1
@@ -72,8 +77,21 @@ ball_vel_y:             .res 1
 ball_acc_x:             .res 1
 ball_acc_y:             .res 1
 gravity:                .res 1
+frame_counter:          .res 1
 ball_max_speed:         .res 1
 ball_min_speed:         .res 1
+;
+bullet_speed:           .res 1
+bullet_max_distance:    .res 1
+b1_x:                   .res 1
+b1_y:                   .res 1
+b1_d:                   .res 1
+b2_x:                   .res 1
+b2_y:                   .res 1
+b2_d:                   .res 1
+b3_x:                   .res 1
+b3_y:                   .res 1
+b3_d:                   .res 1
 ; Reserve remaining space in this section if needed
                         .res 07   ; Pad to $30 (optional)
 
@@ -207,18 +225,6 @@ remaining_loop:
  	LDA #$8A
  	STA PPU_ADDRESS
 
-  ; print text
-  ; draw some text on the screen
-  LDX #0
-textloop:
-  LDA hello_txt, X
-  STA PPU_VRAM_IO
-  INX
-  CMP #0
-  BEQ :+
-  JMP textloop
-  :
-
   ; Reset scroll registers to 0,0 (needed after VRAM access)
   LDA #$00
   STA PPU_SCROLL                         ; Write horizontal scroll
@@ -226,6 +232,30 @@ textloop:
 
   RTS                                    ; Done
 
+.endproc
+
+  ; print text
+  ; draw some text on the screen
+PPU_ADDR = $2006
+PPU_DATA = $2007
+.proc write_start_text
+  ; Set VRAM address to row 15, column 11 → $21EB
+  LDA #$21
+  STA $2006       ; PPU_ADDR high byte
+  LDA #$EB
+  STA $2006       ; PPU_ADDR low byte
+
+  ; Write text bytes
+  LDX #0
+loop:
+  LDA start_txt, X
+  CMP #0
+  BEQ done
+  STA $2007       ; PPU_DATA
+  INX
+  JMP loop
+done:
+  RTS
 .endproc
 
 .proc init_sprites
@@ -252,6 +282,12 @@ textloop:
   STA SPRITE_3_ADDR + SPRITE_OFFSET_TILE
   LDA #6
   STA SPRITE_Ball_ADDR + SPRITE_OFFSET_TILE
+  LDA #5
+  STA SPRITE_Bullet1_ADDR + SPRITE_OFFSET_TILE
+  LDA #5
+  STA SPRITE_Bullet2_ADDR + SPRITE_OFFSET_TILE
+  LDA #5
+  STA SPRITE_Bullet3_ADDR + SPRITE_OFFSET_TILE
 
   RTS
 .endproc
@@ -274,8 +310,19 @@ textloop:
   LDA #01
   STA gravity
 
-  LDA #014
+  LDA #07
   STA ball_max_speed
+
+  LDA #4
+  STA bullet_speed
+
+  LDA #40
+  STA bullet_max_distance
+
+  LDA bullet_max_distance
+  STA b1_d
+  STA b2_d
+  STA b3_d
 
   ; calculate two's complement: ball_min_speed = -ball_max_speed
 
@@ -284,6 +331,7 @@ EOR #$FF       ; invert bits
 CLC
 ADC #1         ; add 1 → two's complement
 STA ball_min_speed
+
 
 
   RTS
@@ -329,6 +377,61 @@ STA ball_min_speed
   ;DEC scroll
   ;LDA scroll
   STA PPU_SCROLL                         ; Write vertical scroll
+
+  ; ---- Bullet 1 ----
+  LDA b1_d
+  CMP bullet_max_distance
+  BCS hide_b1_sprite    ; if expired, move offscreen
+
+  ; Draw active sprite
+  LDA b1_x
+  STA SPRITE_Bullet1_ADDR + SPRITE_OFFSET_X
+
+  LDA b1_y
+  STA SPRITE_Bullet1_ADDR + SPRITE_OFFSET_Y
+  JMP skip_b1_draw
+
+hide_b1_sprite:
+  LDA #240
+  STA SPRITE_Bullet1_ADDR + SPRITE_OFFSET_Y  ; offscreen
+skip_b1_draw:
+
+
+  ; ---- Bullet 2 ----
+  LDA b2_d
+  CMP bullet_max_distance
+  BCS hide_b2_sprite
+
+  LDA b2_x
+  STA SPRITE_Bullet2_ADDR + SPRITE_OFFSET_X
+
+  LDA b2_y
+  STA SPRITE_Bullet2_ADDR + SPRITE_OFFSET_Y
+  JMP skip_b2_draw
+
+hide_b2_sprite:
+  LDA #240
+  STA SPRITE_Bullet2_ADDR + SPRITE_OFFSET_Y
+skip_b2_draw:
+
+
+  ; ---- Bullet 3 ----
+  LDA b3_d
+  CMP bullet_max_distance
+  BCS hide_b3_sprite
+
+  LDA b3_x
+  STA SPRITE_Bullet3_ADDR + SPRITE_OFFSET_X
+
+  LDA b3_y
+  STA SPRITE_Bullet3_ADDR + SPRITE_OFFSET_Y
+  JMP skip_b3_draw
+
+hide_b3_sprite:
+  LDA #240
+  STA SPRITE_Bullet3_ADDR + SPRITE_OFFSET_Y
+skip_b3_draw:
+
 
   ; Set OAM address to 0 — required before DMA or manual OAM writes
   LDA #$00
@@ -380,31 +483,295 @@ not_left:
     RTS                       ; Return to caller
 .endproc
 
-.proc update_ball
+.proc shoot_bullets
 
+; Check if START is newly pressed
+  LDA controller_1
+  AND #PAD_START
+  BEQ skip_fire_weapon        ; if not pressed now, skip
+
+  LDA controller_1_prev
+  AND #PAD_START
+  BNE skip_fire_weapon        ; if it was already pressed last frame, skip
+
+LDA b1_d
+CMP bullet_max_distance
+BCC skip_b1_active_shootable
+
+    LDA #0
+    STA b1_d
+    LDA player_x
+    CLC
+    ADC #3
+    STA b1_x
+    LDA player_y
+    STA b1_y
+
+  JMP skip_fire_weapon
+
+skip_b1_active_shootable:
+
+LDA b2_d
+CMP bullet_max_distance
+BCC skip_b2_active_shootable
+
+    LDA #0
+    STA b2_d
+    LDA player_x
+    CLC
+    ADC #3
+    STA b2_x
+    LDA player_y
+    STA b2_y
+
+  JMP skip_fire_weapon
+
+skip_b2_active_shootable:
+
+LDA b3_d
+CMP bullet_max_distance
+BCC skip_b3_active_shootable
+
+    LDA #0
+    STA b3_d
+    LDA player_x
+    CLC
+    ADC #3
+    STA b3_x
+    LDA player_y
+    STA b3_y
+
+  JMP skip_fire_weapon
+
+skip_b3_active_shootable:
+
+shoot_blank:
+; show blank image for a second
+
+skip_fire_weapon:
+
+
+
+  RTS
+.endproc
+
+.proc update_bullets
+
+  JSR shoot_bullets
+
+; ---------------------------
+; BULLET 1
+; ---------------------------
+
+  LDA b1_d
+  CMP bullet_max_distance
+  BCS skip_b1_active_phys
+
+  INC b1_d
+  LDA b1_y
+  SEC
+  SBC bullet_speed
+  STA b1_y
+
+  ; --- AABB Collision: b1 <-> ball ---
+  LDA b1_x
+  CLC
+  ADC #8
+  CMP ball_pos_x
+  BCC b1_no_collision
+
+  LDA ball_pos_x
+  CLC
+  ADC #8
+  CMP b1_x
+  BCC b1_no_collision
+
+  LDA b1_y
+  CLC
+  ADC #8
+  CMP ball_pos_y
+  BCC b1_no_collision
+
+  LDA ball_pos_y
+  CLC
+  ADC #8
+  CMP b1_y
+  BCC b1_no_collision
+
+  ; if we passed all checks:
+  JSR punch_ball_upwards
+  LDA bullet_max_distance
+  STA b1_d
+
+b1_no_collision:
+skip_b1_active_phys:
+
+
+; ---------------------------
+; BULLET 2
+; ---------------------------
+
+  LDA b2_d
+  CMP bullet_max_distance
+  BCS skip_b2_active_phys
+
+  INC b2_d
+  LDA b2_y
+  SEC
+  SBC bullet_speed
+  STA b2_y
+
+  ; --- AABB Collision: b2 <-> ball ---
+  LDA b2_x
+  CLC
+  ADC #8
+  CMP ball_pos_x
+  BCC b2_no_collision
+
+  LDA ball_pos_x
+  CLC
+  ADC #8
+  CMP b2_x
+  BCC b2_no_collision
+
+  LDA b2_y
+  CLC
+  ADC #8
+  CMP ball_pos_y
+  BCC b2_no_collision
+
+  LDA ball_pos_y
+  CLC
+  ADC #8
+  CMP b2_y
+  BCC b2_no_collision
+
+  ; collision!
+  JSR punch_ball_upwards
+  LDA bullet_max_distance
+  STA b2_d
+
+b2_no_collision:
+skip_b2_active_phys:
+
+
+; ---------------------------
+; BULLET 3
+; ---------------------------
+
+  LDA b3_d
+  CMP bullet_max_distance
+  BCS skip_b3_active_phys
+
+  INC b3_d
+  LDA b3_y
+  SEC
+  SBC bullet_speed
+  STA b3_y
+
+  ; --- AABB Collision: b3 <-> ball ---
+  LDA b3_x
+  CLC
+  ADC #8
+  CMP ball_pos_x
+  BCC b3_no_collision
+
+  LDA ball_pos_x
+  CLC
+  ADC #8
+  CMP b3_x
+  BCC b3_no_collision
+
+  LDA b3_y
+  CLC
+  ADC #8
+  CMP ball_pos_y
+  BCC b3_no_collision
+
+  LDA ball_pos_y
+  CLC
+  ADC #8
+  CMP b3_y
+  BCC b3_no_collision
+
+  ; collision!
+  JSR punch_ball_upwards
+  LDA bullet_max_distance
+  STA b3_d
+
+b3_no_collision:
+skip_b3_active_phys:
+
+  RTS
+.endproc
+
+
+
+.proc punch_ball_upwards
+
+
+  LDA bullet_speed
+  EOR #$FF   ; bitwise NOT (invert)
+  CLC
+  ADC #1     ; +1 to complete two's complement = -bullet_speed
+  STA ball_vel_y
+
+
+  RTS
+.endproc
+
+.proc update_ball_gravity
+
+; Increment frame counter
+  LDA frame_counter
+  CLC
+  ADC #1
+  CMP #4       ; Compare to 4
+  BNE no_reset
+  LDA #0       ; Reset counter to 0
+no_reset:
+  STA frame_counter
+
+  ; Check if frame_counter == 0 (every 4th frame)
+  LDA frame_counter
+  BEQ apply_gravity
+  JMP end_update
+
+apply_gravity:
   ; Apply gravity
   LDA ball_acc_y
   CLC
   ADC gravity
   STA ball_acc_y
 
+end_update:
+
+RTS
+
+.endproc
+
+.proc update_ball
+
+  ; Apply gravity
+  JSR update_ball_gravity
+
   ; Apply input to ball_acc_x
-LDA controller_1
-AND #PAD_B
-BEQ skip_left
-  LDA ball_acc_x
-  SEC
-  SBC #1
-  STA ball_acc_x
+  LDA controller_1
+  AND #PAD_B
+  BEQ skip_left
+    LDA ball_acc_x
+    SEC
+    SBC #1
+    STA ball_acc_x
 skip_left:
 
-LDA controller_1
-AND #PAD_A
-BEQ skip_right
-  LDA ball_acc_x
-  CLC
-  ADC #1
-  STA ball_acc_x
+  LDA controller_1
+  AND #PAD_A
+  BEQ skip_right
+    LDA ball_acc_x
+    CLC
+    ADC #1
+    STA ball_acc_x
 skip_right:
 
   ; Update velocity X
@@ -414,23 +781,21 @@ skip_right:
   STA ball_vel_x
 
   ; Clamp X velocity between -max and +max
-
-LDA ball_vel_x
-BMI clamp_x_low
-CMP ball_max_speed
-BCC skip_clamp_x
-  LDA ball_max_speed
-  STA ball_vel_x
-  JMP skip_clamp_x
+  LDA ball_vel_x
+  BMI clamp_x_low
+  CMP ball_max_speed
+  BCC skip_clamp_x
+    LDA ball_max_speed
+    STA ball_vel_x
+    JMP skip_clamp_x
 
 clamp_x_low:
-CMP ball_min_speed
-BCS skip_clamp_x
-  LDA ball_min_speed
-  STA ball_vel_x
+  CMP ball_min_speed
+  BCS skip_clamp_x
+    LDA ball_min_speed
+    STA ball_vel_x
 
 skip_clamp_x:
-
 
   ; Update position X
   LDA ball_pos_x
@@ -464,20 +829,19 @@ skip_wall_x:
   STA ball_vel_y
 
   ; Clamp Y velocity between -max and +max
-
-LDA ball_vel_y
-BMI clamp_y_low
-CMP ball_max_speed
-BCC skip_clamp_y
-  LDA ball_max_speed
-  STA ball_vel_y
-  JMP skip_clamp_y
+  LDA ball_vel_y
+  BMI clamp_y_low
+  CMP ball_max_speed
+  BCC skip_clamp_y
+    LDA ball_max_speed
+    STA ball_vel_y
+    JMP skip_clamp_y
 
 clamp_y_low:
-CMP ball_min_speed
-BCS skip_clamp_y
-  LDA ball_min_speed
-  STA ball_vel_y
+  CMP ball_min_speed
+  BCS skip_clamp_y
+    LDA ball_min_speed
+    STA ball_vel_y
 
 skip_clamp_y:
 
@@ -499,11 +863,8 @@ check_bottom_wall:
   LDA ball_pos_y
   CMP #210
   BCC skip_wall_y
-    LDA ball_vel_y
-    EOR #$FF
-    CLC
-    ADC #1
-    STA ball_vel_y
+    ; Instead of bouncing, call reach_bottom to reset position
+    JSR reach_bottom
 skip_wall_y:
 
   ; Reset acceleration
@@ -513,6 +874,61 @@ skip_wall_y:
 
   RTS
 .endproc
+
+.proc reach_bottom
+
+  ; Reset position Y to top (0)
+  LDA #0
+  STA ball_pos_y
+
+  ; Reset vertical velocity
+  LDA #0
+  STA ball_vel_y
+
+  RTS
+
+.endproc
+
+.proc open_start_menu
+  LDA start_text_drawn
+  CMP #0
+  BNE skip_draw
+
+  ; Disable rendering before VRAM writes
+  LDA #$00
+  STA PPU_MASK
+
+  JSR write_start_text
+
+  ; Enable rendering again (background + sprites + left 8 pixels)
+  LDA #(PPUMASK_SHOW_BG | PPUMASK_SHOW_SPRITES | PPUMASK_SHOW_BG_LEFT | PPUMASK_SHOW_SPRITES_LEFT)
+  STA PPU_MASK
+
+  LDA #1
+  STA start_text_drawn
+
+skip_draw:
+  RTS
+.endproc
+
+
+.proc clear_start_text
+  ; Same position as write_start_text ($21EB)
+  LDA #$21
+  STA $2006
+  LDA #$EB
+  STA $2006
+
+  LDX #10           ; 10 chars to erase
+  LDA #$20          ; $20 = blank tile (space)
+loop:
+  STA $2007
+  DEX
+  BNE loop
+
+  RTS
+.endproc
+
 
 
 ;******************************************************************************
@@ -542,6 +958,7 @@ skip_wall_y:
     LDA #(PPUMASK_SHOW_BG | PPUMASK_SHOW_SPRITES | PPUMASK_SHOW_BG_LEFT | PPUMASK_SHOW_SPRITES_LEFT)
     STA PPU_MASK
 
+
 forever:
     JSR get_random
 
@@ -550,16 +967,33 @@ forever:
 
     ; Read controller
     JSR read_controller
-    JSR update_player
-    JSR update_ball
 
-    ; Update sprite data (DMA transfer to PPU OAM)
-    JSR update_sprites
+
+    ; Load Scenes
+    LDA scene
+    CMP #0
+    BNE skip_start_scene
+      JSR open_start_menu
+    skip_start_scene:
+
+    LDA scene
+    CMP #1
+    BNE skip_game_scene
+
+      JSR update_player
+      JSR update_bullets
+      JSR update_ball
+
+      ; Update sprite data (DMA transfer to PPU OAM)
+      JSR update_sprites
+
+    skip_game_scene:
 
     ; Infinite loop — keep running frame logic
     JMP forever
 
 .endproc
+
 
 ; ------------------------------------------------------------------------------
 ; Procedure: read_controller
@@ -661,8 +1095,8 @@ sprite_data:
 .byte 38, 3, 0, 40
 .byte 38, 4, 0, 48
 
-hello_txt:
-.byte ' ', 0
+start_txt:
+.byte 'S', 'T', 'A', 'R', 'T' ,' ', 'G', 'A', 'M', 'E', 0
 
 ; Startup segment
 .segment "STARTUP"
