@@ -9,6 +9,7 @@ SPRITE_Ball_ADDR = oam + 16
 SPRITE_Bullet1_ADDR = oam + 20
 SPRITE_Bullet2_ADDR = oam + 24
 SPRITE_Bullet3_ADDR = oam + 28
+SPRITE_Bounce_ADDR = oam + 32
 
 ;*****************************************************************
 ; Define NES cartridge Header
@@ -61,14 +62,15 @@ controller_1_released:  .res 1    ; Check if released
 game_state:             .res 1    ; Current game state
 player_x:               .res 1    ; Player X position
 player_y:               .res 1    ; Player Y position
-player_vel_x:           .res 1    ; Player X velocity
-player_vel_y:           .res 1    ; Player Y velocity
+player_vel:             .res 1    ; Player Y velocity
 score:                  .res 1    ; Score low byte
 scroll:                 .res 1    ; Scroll screen
 time:                   .res 1    ; Time (60hz = 60 FPS)
 seconds:                .res 1    ; Seconds
 scene:                  .res 1
 start_text_drawn:       .res 1
+con_bounce:             .res 1
+show_bounce_sprite:     .res 1
 ;
 ball_pos_x:             .res 1
 ball_pos_y:             .res 1
@@ -239,24 +241,42 @@ remaining_loop:
 PPU_ADDR = $2006
 PPU_DATA = $2007
 .proc write_start_text
-  ; Set VRAM address to row 15, column 11 → $21EB
-  LDA #$21
-  STA $2006       ; PPU_ADDR high byte
-  LDA #$EB
-  STA $2006       ; PPU_ADDR low byte
+  ; Draw title_txt at $208A (row 4, col 10)
+  LDA #$20          ; high byte for $208A
+  STA $2006
+  LDA #$8A          ; low byte
+  STA $2006
 
-  ; Write text bytes
   LDX #0
-loop:
+write_title_loop:
+  LDA title_txt, X
+  CMP #0
+  BEQ write_start_line
+  STA $2007
+  INX
+  JMP write_title_loop
+
+write_start_line:
+  ; Draw start_txt at $20C3 (row 6, col 11)
+  LDA #$20          ; high byte for $20C3
+  STA $2006
+  LDA #$C3          ; low byte
+  STA $2006
+
+  LDX #0
+write_start_loop:
   LDA start_txt, X
   CMP #0
   BEQ done
-  STA $2007       ; PPU_DATA
+  STA $2007
   INX
-  JMP loop
+  JMP write_start_loop
+
 done:
   RTS
 .endproc
+
+
 
 .proc init_sprites
 
@@ -294,11 +314,14 @@ done:
 
 .proc init_gamedata
   ;player
-  LDA #128
+  LDA #124
   STA player_x
 
   LDA #190
   STA player_y
+
+  LDA #3
+  STA player_vel
 
   ;ball
   LDA #128
@@ -433,6 +456,25 @@ hide_b3_sprite:
 skip_b3_draw:
 
 
+
+
+LDA show_bounce_sprite
+  BEQ skip_bounce_sprite
+
+  ; leave sprite as-is this frame
+  LDA #0
+  STA show_bounce_sprite
+
+  JMP done_bounce_sprite
+
+skip_bounce_sprite:
+  ; erase it by moving it offscreen
+  LDA #240
+  STA SPRITE_Bounce_ADDR + SPRITE_OFFSET_Y
+
+done_bounce_sprite:
+
+
   ; Set OAM address to 0 — required before DMA or manual OAM writes
   LDA #$00
   STA PPU_SPRRAM_ADDRESS    ; $2003 — OAM address register
@@ -453,7 +495,7 @@ skip_b3_draw:
       LDA player_x
       ;DEX
       SEC
-      SBC #$01
+      SBC player_vel
       STA player_x
 not_left:
     LDA controller_1
@@ -461,7 +503,7 @@ not_left:
     BEQ not_right
       LDA player_x
       CLC
-      ADC #$01
+      ADC player_vel
       STA player_x
   not_right:
     LDA controller_1
@@ -469,7 +511,7 @@ not_left:
     BEQ not_up
       LDA player_y
       SEC
-      SBC #$01
+      SBC player_vel
       STA player_y
   not_up:
     LDA controller_1
@@ -477,7 +519,7 @@ not_left:
     BEQ not_down
       LDA player_y
       CLC
-      ADC #$01
+      ADC player_vel
       STA player_y
   not_down:
     RTS                       ; Return to caller
@@ -705,6 +747,37 @@ skip_b3_active_phys:
   RTS
 .endproc
 
+.proc score_points
+  INC con_bounce
+  JSR show_bounce_score_sprite
+
+  RTS
+.endproc
+
+.proc show_bounce_score_sprite
+  LDA con_bounce       ; load current bounce count (0–9 for now)
+  CLC
+  ADC #'0'             ; convert to ASCII tile number (e.g., 0 → tile index for '0')
+  STA SPRITE_Bounce_ADDR + SPRITE_OFFSET_TILE
+
+  ; Optional: place it relative to ball
+  LDA ball_pos_x
+  CLC
+  ADC #12              ; offset right
+  STA SPRITE_Bounce_ADDR + SPRITE_OFFSET_X
+
+  LDA ball_pos_y
+  CLC
+  ADC #12              ; offset down
+  STA SPRITE_Bounce_ADDR + SPRITE_OFFSET_Y
+
+  ; Optional: set palette and visibility
+  LDA #%00000000       ; palette 0, no flipping
+  STA SPRITE_Bounce_ADDR + SPRITE_OFFSET_ATTRIB
+
+  RTS
+.endproc
+
 
 
 .proc punch_ball_upwards
@@ -715,10 +788,49 @@ skip_b3_active_phys:
   CLC
   ADC #1     ; +1 to complete two's complement = -bullet_speed
   STA ball_vel_y
+  JSR score_points
+
+  JSR nudge_ball_x
 
 
   RTS
 .endproc
+
+.proc nudge_ball_x
+  JSR get_random        ; updates random_num
+  LDA random_num
+  AND #%00000011        ; mask to 0–3
+
+  CMP #0
+  BEQ set_neg_one
+
+  CMP #1
+  BEQ set_zero
+
+  CMP #2
+  BEQ set_pos_one
+
+  ; If 3 → do nothing
+  RTS
+
+set_neg_one:
+  LDA #$FF              ; -1 in two's complement
+  STA ball_vel_x
+  RTS
+
+set_zero:
+  LDA #0
+  STA ball_vel_x
+  RTS
+
+set_pos_one:
+  LDA #1
+  STA ball_vel_x
+  RTS
+
+.endproc
+
+
 
 .proc update_ball_gravity
 
@@ -911,23 +1023,36 @@ skip_draw:
   RTS
 .endproc
 
-
 .proc clear_start_text
-  ; Same position as write_start_text ($21EB)
-  LDA #$21
+  ; Clear title_txt line (11 chars) at $208A
+  LDA #$20
   STA $2006
-  LDA #$EB
+  LDA #$8A
   STA $2006
 
-  LDX #10           ; 10 chars to erase
-  LDA #$20          ; $20 = blank tile (space)
-loop:
+  LDX #11
+clear_title_loop:
+  LDA #$20
   STA $2007
   DEX
-  BNE loop
+  BNE clear_title_loop
+
+  ; Clear start_txt line (10 chars) at $20C3
+  LDA #$20
+  STA $2006
+  LDA #$C3
+  STA $2006
+
+  LDX #10
+clear_start_loop:
+  LDA #$20
+  STA $2007
+  DEX
+  BNE clear_start_loop
 
   RTS
 .endproc
+
 
 
 
@@ -942,6 +1067,7 @@ loop:
     ; seed the random number
     LDA #$45
     STA random_num
+
     ;--------------------------------------------------------------------------
     ; Configure PPU Control Register ($2000)
     ; - Enable NMI on VBlank (bit 7 = 1)
@@ -958,41 +1084,68 @@ loop:
     LDA #(PPUMASK_SHOW_BG | PPUMASK_SHOW_SPRITES | PPUMASK_SHOW_BG_LEFT | PPUMASK_SHOW_SPRITES_LEFT)
     STA PPU_MASK
 
-
 forever:
     JSR get_random
-
-    ; Wait for vertical blank before doing game logic and rendering updates
     wait_for_vblank
-
-    ; Read controller
     JSR read_controller
 
+    ; Always update and draw player, ball, bullets (even in scene 0)
+    JSR update_player
+    JSR update_bullets
+    JSR update_ball
 
-    ; Load Scenes
+    ; Update sprites in OAM (draw all sprites: player, ball, bullets)
+    JSR update_sprites
+
+    ; Handle scene logic
     LDA scene
     CMP #0
-    BNE skip_start_scene
-      JSR open_start_menu
-    skip_start_scene:
+    BNE not_scene_0
 
-    LDA scene
-    CMP #1
-    BNE skip_game_scene
+      ; Scene 0 - start menu
 
-      JSR update_player
-      JSR update_bullets
-      JSR update_ball
+      ; If not drawn yet, draw start text once
+      LDA start_text_drawn
+      CMP #0
+      BNE skip_draw_start_text
 
-      ; Update sprite data (DMA transfer to PPU OAM)
-      JSR update_sprites
+      ; Disable rendering before VRAM writes
+      LDA #$00
+      STA PPU_MASK
+      JSR write_start_text
+      ; Enable rendering again
+      LDA #(PPUMASK_SHOW_BG | PPUMASK_SHOW_SPRITES | PPUMASK_SHOW_BG_LEFT | PPUMASK_SHOW_SPRITES_LEFT)
+      STA PPU_MASK
 
-    skip_game_scene:
+      LDA #1
+      STA start_text_drawn
 
-    ; Infinite loop — keep running frame logic
+    skip_draw_start_text:
+
+      ; Wait for START press to advance scene
+      LDA controller_1
+      AND #PAD_START
+      BEQ not_scene_0  ; START not pressed, keep waiting
+
+      ; START pressed, clear start text
+      LDA #$00
+      STA PPU_MASK
+      JSR clear_start_text
+      LDA #(PPUMASK_SHOW_BG | PPUMASK_SHOW_SPRITES | PPUMASK_SHOW_BG_LEFT | PPUMASK_SHOW_SPRITES_LEFT)
+      STA PPU_MASK
+
+      INC scene
+      LDA #0
+      STA start_text_drawn
+
+    not_scene_0:
+
+    ; Scene 1+ gameplay already updated by update_player etc.
+
     JMP forever
 
 .endproc
+
 
 
 ; ------------------------------------------------------------------------------
@@ -1097,6 +1250,11 @@ sprite_data:
 
 start_txt:
 .byte 'S', 'T', 'A', 'R', 'T' ,' ', 'G', 'A', 'M', 'E', 0
+
+title_txt:
+.byte 'R', 'O', 'C', 'K', 'E', 'T' ,'O', 'C', 'K', 'Y', '!', 0
+
+
 
 ; Startup segment
 .segment "STARTUP"
