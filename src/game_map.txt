@@ -1,9 +1,9 @@
 Modules list:
 -------------
 game.o:
-    CODE              Offs=000000  Size=0004D5  Align=00001  Fill=0000
-    RODATA            Offs=000000  Size=000447  Align=00001  Fill=0000
-    ZEROPAGE          Offs=000000  Size=000048  Align=00001  Fill=0000
+    CODE              Offs=000000  Size=0005FD  Align=00001  Fill=0000
+    RODATA            Offs=000000  Size=00045B  Align=00001  Fill=0000
+    ZEROPAGE          Offs=000000  Size=000037  Align=00001  Fill=0000
     HEADER            Offs=000000  Size=000008  Align=00001  Fill=0000
     VECTORS           Offs=000000  Size=000006  Align=00001  Fill=0000
     OAM               Offs=000000  Size=000100  Align=00001  Fill=0000
@@ -17,11 +17,11 @@ Name                   Start     End    Size  Align
 ----------------------------------------------------
 CHARS                 000000  001FFF  002000  00001
 HEADER                000000  000007  000008  00001
-ZEROPAGE              000000  000047  000048  00001
+ZEROPAGE              000000  000036  000037  00001
 OAM                   000200  0002FF  000100  00001
 STARTUP               008000  00803A  00003B  00001
-CODE                  00803B  00850F  0004D5  00001
-RODATA                008510  008956  000447  00001
+CODE                  00803B  008637  0005FD  00001
+RODATA                008638  008A92  00045B  00001
 VECTORS               00FFFA  00FFFF  000006  00001
 
 

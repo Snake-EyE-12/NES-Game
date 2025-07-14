@@ -56,7 +56,7 @@ controller_1_pressed:   .res 1    ; Check if pressed
 controller_1_released:  .res 1    ; Check if released
 
 ; Reserve remaining space in this section if needed
-                        .res 10   ; Pad to $20 (optional)
+;                        .res 10   ; Pad to $20 (optional)
 
 ; $20-$2F: Game state variables
 game_state:             .res 1    ; Current game state
@@ -95,7 +95,7 @@ b3_x:                   .res 1
 b3_y:                   .res 1
 b3_d:                   .res 1
 ; Reserve remaining space in this section if needed
-                        .res 07   ; Pad to $30 (optional)
+;                        .res 07   ; Pad to $30 (optional)
 
 ;*****************************************************************
 ; OAM (Object Attribute Memory) ($0200–$02FF)
@@ -276,6 +276,87 @@ done:
   RTS
 .endproc
 
+.proc redraw_background
+    wait_for_vblank                        ; Wait for VBlank
+
+    vram_set_address NAME_TABLE_0_ADDRESS  ; Set VRAM address to $2000
+
+    ; Set pointer to nametable_data
+    LDA #<nametable_data
+    STA temp_ptr_low
+    LDA #>nametable_data
+    STA temp_ptr_high
+
+    ; Copy 768 bytes (3 pages of 256)
+    LDY #$00
+    LDX #$03
+load_background_page:
+    LDA (temp_ptr_low),Y
+    STA PPU_VRAM_IO
+    INY
+    BNE load_background_page
+    INC temp_ptr_high
+    DEX
+    BNE load_background_page
+
+    ; Copy remaining 192 bytes
+    LDY #$00
+copy_background_remaining:
+    LDA (temp_ptr_low),Y
+    STA PPU_VRAM_IO
+    INY
+    CPY #192
+    BNE copy_background_remaining
+
+    RTS
+.endproc
+
+
+.proc redraw_menu
+  ; Disable rendering assumed done by caller
+  ; Write menu text via write_start_text or similar routine
+  JSR write_start_text
+  RTS
+.endproc
+
+
+
+.proc draw_score
+  ; Set PPU address to desired location (e.g., row 1 col 5 → $2025)
+  LDA #$20
+  STA PPU_ADDR
+  LDA #$26
+  STA PPU_ADDR
+
+  ; Write "SCORE:"
+  LDX #0
+write_score_label_loop:
+  LDA score_txt, X
+  CMP #0
+  BEQ write_score_number
+  STA PPU_DATA
+  INX
+  JMP write_score_label_loop
+
+write_score_number:
+  ; Clear previous digit just in case
+  LDA #' '
+  STA PPU_DATA
+
+  LDA score        ; Load score (0–9)
+  CLC
+  ADC #'0'         ; Convert to ASCII
+  STA PPU_DATA     ; Write digit after "SCORE:"
+
+  LDA #$20
+  STA PPU_ADDR
+  LDA #$02
+  STA PPU_ADDR
+
+
+  RTS
+.endproc
+
 
 
 .proc init_sprites
@@ -308,6 +389,8 @@ done:
   STA SPRITE_Bullet2_ADDR + SPRITE_OFFSET_TILE
   LDA #5
   STA SPRITE_Bullet3_ADDR + SPRITE_OFFSET_TILE
+  LDA #7
+  STA SPRITE_Bounce_ADDR + SPRITE_OFFSET_TILE
 
   RTS
 .endproc
@@ -339,7 +422,7 @@ done:
   LDA #4
   STA bullet_speed
 
-  LDA #40
+  LDA #60
   STA bullet_max_distance
 
   LDA bullet_max_distance
@@ -354,6 +437,34 @@ EOR #$FF       ; invert bits
 CLC
 ADC #1         ; add 1 → two's complement
 STA ball_min_speed
+
+
+; Reset game variables to zero
+  LDA #0
+  STA score
+  STA scene
+  STA start_text_drawn
+  STA con_bounce
+  STA show_bounce_sprite
+  STA ball_acc_x
+  STA ball_acc_y
+  STA ball_vel_x
+  STA ball_vel_y
+  STA game_over_triggered
+
+  ; Reset bullets positions and distances
+  STA b1_x
+  STA b1_y
+  STA b1_d
+
+  STA b2_x
+  STA b2_y
+  STA b2_d
+
+  STA b3_x
+  STA b3_y
+  STA b3_d
+
 
 
 
@@ -400,6 +511,30 @@ STA ball_min_speed
   ;DEC scroll
   ;LDA scroll
   STA PPU_SCROLL                         ; Write vertical scroll
+
+
+
+  LDA show_bounce_sprite
+  CMP #0
+  BEQ skip_show_bounce_effect
+  LDA ball_pos_x
+  CLC
+  ADC #8
+  STA SPRITE_Bounce_ADDR + SPRITE_OFFSET_X
+  LDA ball_pos_y
+  CLC
+  ADC #8
+  STA SPRITE_Bounce_ADDR + SPRITE_OFFSET_Y
+  DEC show_bounce_sprite
+  JMP skip_erase_bounce_effect
+
+  skip_show_bounce_effect:
+  LDA #240
+  STA SPRITE_Bounce_ADDR + SPRITE_OFFSET_Y
+
+  skip_erase_bounce_effect:
+
+
 
   ; ---- Bullet 1 ----
   LDA b1_d
@@ -457,24 +592,6 @@ skip_b3_draw:
 
 
 
-
-LDA show_bounce_sprite
-  BEQ skip_bounce_sprite
-
-  ; leave sprite as-is this frame
-  LDA #0
-  STA show_bounce_sprite
-
-  JMP done_bounce_sprite
-
-skip_bounce_sprite:
-  ; erase it by moving it offscreen
-  LDA #240
-  STA SPRITE_Bounce_ADDR + SPRITE_OFFSET_Y
-
-done_bounce_sprite:
-
-
   ; Set OAM address to 0 — required before DMA or manual OAM writes
   LDA #$00
   STA PPU_SPRRAM_ADDRESS    ; $2003 — OAM address register
@@ -483,6 +600,7 @@ done_bounce_sprite:
   ; Write the high byte of the source address (e.g., $02 for $0200)
   LDA #>oam
   STA SPRITE_DMA            ; $4014 — triggers OAM DMA (513–514 cycles, CPU stalled)
+
 
   RTS
 
@@ -605,6 +723,12 @@ skip_fire_weapon:
 ; BULLET 1
 ; ---------------------------
 
+  LDA b1_y
+  CMP bullet_speed
+  BCS skip_b1_hit_roof
+    LDA bullet_max_distance
+    STA b1_d
+  skip_b1_hit_roof:
   LDA b1_d
   CMP bullet_max_distance
   BCS skip_b1_active_phys
@@ -653,6 +777,12 @@ skip_b1_active_phys:
 ; BULLET 2
 ; ---------------------------
 
+  LDA b2_y
+  CMP bullet_speed
+  BCS skip_b2_hit_roof
+    LDA bullet_max_distance
+    STA b2_d
+  skip_b2_hit_roof:
   LDA b2_d
   CMP bullet_max_distance
   BCS skip_b2_active_phys
@@ -701,6 +831,12 @@ skip_b2_active_phys:
 ; BULLET 3
 ; ---------------------------
 
+  LDA b3_y
+  CMP bullet_speed
+  BCS skip_b3_hit_roof
+    LDA bullet_max_distance
+    STA b3_d
+  skip_b3_hit_roof:
   LDA b3_d
   CMP bullet_max_distance
   BCS skip_b3_active_phys
@@ -749,35 +885,28 @@ skip_b3_active_phys:
 
 .proc score_points
   INC con_bounce
-  JSR show_bounce_score_sprite
+  LDA #16
+  STA show_bounce_sprite
 
-  RTS
-.endproc
+  LDA con_bounce
+  CMP #10
+  BCS skip_normal_effect_increment
 
-.proc show_bounce_score_sprite
-  LDA con_bounce       ; load current bounce count (0–9 for now)
+  LDA #$30
   CLC
-  ADC #'0'             ; convert to ASCII tile number (e.g., 0 → tile index for '0')
+  ADC con_bounce
+  JMP set_effect_sprite
+
+  skip_normal_effect_increment:
+
+  LDA #$07
+
+  set_effect_sprite:
+
   STA SPRITE_Bounce_ADDR + SPRITE_OFFSET_TILE
 
-  ; Optional: place it relative to ball
-  LDA ball_pos_x
-  CLC
-  ADC #12              ; offset right
-  STA SPRITE_Bounce_ADDR + SPRITE_OFFSET_X
-
-  LDA ball_pos_y
-  CLC
-  ADC #12              ; offset down
-  STA SPRITE_Bounce_ADDR + SPRITE_OFFSET_Y
-
-  ; Optional: set palette and visibility
-  LDA #%00000000       ; palette 0, no flipping
-  STA SPRITE_Bounce_ADDR + SPRITE_OFFSET_ATTRIB
-
   RTS
 .endproc
-
 
 
 .proc punch_ball_upwards
@@ -988,7 +1117,6 @@ skip_wall_y:
 .endproc
 
 .proc reach_bottom
-
   ; Reset position Y to top (0)
   LDA #0
   STA ball_pos_y
@@ -997,63 +1125,76 @@ skip_wall_y:
   LDA #0
   STA ball_vel_y
 
-  RTS
-
-.endproc
-
-.proc open_start_menu
-  LDA start_text_drawn
+  LDA scene
   CMP #0
-  BNE skip_draw
+  BEQ skip_scoring_ball_drop
 
-  ; Disable rendering before VRAM writes
-  LDA #$00
-  STA PPU_MASK
+  LDA con_bounce
+  CMP #10
+  BCS bottom_score_increase
 
-  JSR write_start_text
-
-  ; Enable rendering again (background + sprites + left 8 pixels)
-  LDA #(PPUMASK_SHOW_BG | PPUMASK_SHOW_SPRITES | PPUMASK_SHOW_BG_LEFT | PPUMASK_SHOW_SPRITES_LEFT)
-  STA PPU_MASK
+  bottom_lose_game:
+  ; Check if game over was already triggered
+  LDA game_over_triggered
+  BNE skip_end_game       ; If already triggered, don't call again
 
   LDA #1
-  STA start_text_drawn
+  STA game_over_triggered ; Set flag to prevent multiple calls
+  JSR end_game            ; Use JSR instead of JMP so we return
+  JMP skip_scoring_ball_drop
 
-skip_draw:
+  skip_end_game:
+  JMP skip_scoring_ball_drop
+
+  bottom_score_increase:
+  INC score
+  LDA #0
+  STA con_bounce
+
+  skip_scoring_ball_drop:
   RTS
 .endproc
 
-.proc clear_start_text
-  ; Clear title_txt line (11 chars) at $208A
+.proc draw_final_score
+  ; Set PPU address to desired location (e.g., row 1 col 5 → $2025)
   LDA #$20
-  STA $2006
-  LDA #$8A
-  STA $2006
+  STA PPU_ADDR
+  LDA #$26
+  STA PPU_ADDR
 
-  LDX #11
-clear_title_loop:
-  LDA #$20
-  STA $2007
-  DEX
-  BNE clear_title_loop
+  ; Write "SCORE:"
+  LDX #0
+write_final_score_label_loop:
+  LDA score_final_txt, X
+  CMP #0
+  BEQ write_final_score_number
+  STA PPU_DATA
+  INX
+  JMP write_final_score_label_loop
 
-  ; Clear start_txt line (10 chars) at $20C3
-  LDA #$20
-  STA $2006
-  LDA #$C3
-  STA $2006
+write_final_score_number:
+  ; Clear previous digit just in case
+  LDA #' '
+  STA PPU_DATA
 
-  LDX #10
-clear_start_loop:
+  LDA score        ; Load score (0–9)
+  CLC
+  ADC #'0'         ; Convert to ASCII
+  STA PPU_DATA     ; Write digit after "SCORE:"
+
   LDA #$20
-  STA $2007
-  DEX
-  BNE clear_start_loop
+  STA PPU_ADDR
+  LDA #$02
+  STA PPU_ADDR
+
 
   RTS
 .endproc
 
-
+.proc end_game
+    INC scene
+    RTS
+.endproc
 
 
 ;******************************************************************************
@@ -1063,85 +1204,131 @@ clear_start_loop:
 ; Initializes PPU control settings, enables rendering, and enters
 ; an infinite loop where it waits for VBlank and updates sprite data.
 ;******************************************************************************
+; Add a flag to track if the background/menu has been drawn for game over
+game_over_drawn_flag: .res 1
+final_score_drawn:      .res 1
+game_over_triggered:    .res 1
+
 .proc main
     ; seed the random number
     LDA #$45
     STA random_num
 
-    ;--------------------------------------------------------------------------
     ; Configure PPU Control Register ($2000)
-    ; - Enable NMI on VBlank (bit 7 = 1)
-    ; - Use pattern table 1 ($1000) for background tiles (bit 4 = 1)
-    ;--------------------------------------------------------------------------
     LDA #(PPUCTRL_ENABLE_NMI | PPUCTRL_BG_TABLE_1000)
     STA PPU_CONTROL
 
-    ;--------------------------------------------------------------------------
     ; Configure PPU Mask Register ($2001)
-    ; - Show background and sprites (bits 3 & 4 = 1)
-    ; - Show background and sprites in leftmost 8 pixels (bits 1 & 2 = 1)
-    ;--------------------------------------------------------------------------
     LDA #(PPUMASK_SHOW_BG | PPUMASK_SHOW_SPRITES | PPUMASK_SHOW_BG_LEFT | PPUMASK_SHOW_SPRITES_LEFT)
     STA PPU_MASK
+
+    ; Clear game over drawn flag on start
+    LDA #0
+    STA game_over_drawn_flag
 
 forever:
     JSR get_random
     wait_for_vblank
     JSR read_controller
 
-    ; Always update and draw player, ball, bullets (even in scene 0)
+    ; Scene dispatcher
+    LDA scene
+    CMP #0
+    BEQ scene_start
+
+    CMP #1
+    BEQ scene_game
+
+    JMP scene_game_over
+
+scene_start:
+    ; Only draw start screen once
+    LDA start_text_drawn
+    BNE skip_draw_start_text
+
+    ; Disable rendering
+    LDA #$00
+    STA PPU_MASK
+    JSR redraw_background
+    JSR redraw_menu
+    ; Re-enable rendering
+    LDA #(PPUMASK_SHOW_BG | PPUMASK_SHOW_SPRITES | PPUMASK_SHOW_BG_LEFT | PPUMASK_SHOW_SPRITES_LEFT)
+    STA PPU_MASK
+
+    LDA #1
+    STA start_text_drawn
+
+skip_draw_start_text:
+    JSR update_bullets
+    JSR update_ball
+    JSR update_sprites
+
+    ; Wait for START press to continue
+    LDA controller_1
+    AND #PAD_START
+    BEQ scene_done
+    LDA controller_1_prev
+    AND #PAD_START
+    BNE scene_done
+
+    ; Clear start screen text (space fill)
+    LDA #$00
+    STA PPU_MASK
+    JSR redraw_background
+    LDA #(PPUMASK_SHOW_BG | PPUMASK_SHOW_SPRITES | PPUMASK_SHOW_BG_LEFT | PPUMASK_SHOW_SPRITES_LEFT)
+    STA PPU_MASK
+
+
+    ; Advance scene
+    INC scene
+    LDA #0
+    STA start_text_drawn
+    JMP scene_done
+
+scene_game:
     JSR update_player
     JSR update_bullets
     JSR update_ball
-
-    ; Update sprites in OAM (draw all sprites: player, ball, bullets)
     JSR update_sprites
+    JSR draw_score
+    JMP scene_done
 
-    ; Handle scene logic
-    LDA scene
+scene_game_over:
+    ; Only redraw background/menu once when entering game over scene
+    LDA game_over_drawn_flag
     CMP #0
-    BNE not_scene_0
+    BNE skip_redraw_game_over
 
-      ; Scene 0 - start menu
+    LDA #1
+    STA game_over_drawn_flag
 
-      ; If not drawn yet, draw start text once
-      LDA start_text_drawn
-      CMP #0
-      BNE skip_draw_start_text
+    ; Disable rendering
+    LDA #$00
+    STA PPU_MASK
 
-      ; Disable rendering before VRAM writes
-      LDA #$00
-      STA PPU_MASK
-      JSR write_start_text
-      ; Enable rendering again
-      LDA #(PPUMASK_SHOW_BG | PPUMASK_SHOW_SPRITES | PPUMASK_SHOW_BG_LEFT | PPUMASK_SHOW_SPRITES_LEFT)
-      STA PPU_MASK
+    ;wait_for_vblank         ; Ensure we're in VBlank before writing to PPU
+    ;JSR redraw_background
+    JSR draw_final_score    ; Draw final score only once here
 
-      LDA #1
-      STA start_text_drawn
+    ; Re-enable rendering
+    LDA #(PPUMASK_SHOW_BG | PPUMASK_SHOW_SPRITES | PPUMASK_SHOW_BG_LEFT | PPUMASK_SHOW_SPRITES_LEFT)
+    STA PPU_MASK
 
-    skip_draw_start_text:
 
-      ; Wait for START press to advance scene
-      LDA controller_1
-      AND #PAD_START
-      BEQ not_scene_0  ; START not pressed, keep waiting
 
-      ; START pressed, clear start text
-      LDA #$00
-      STA PPU_MASK
-      JSR clear_start_text
-      LDA #(PPUMASK_SHOW_BG | PPUMASK_SHOW_SPRITES | PPUMASK_SHOW_BG_LEFT | PPUMASK_SHOW_SPRITES_LEFT)
-      STA PPU_MASK
+skip_redraw_game_over:
+    ; Remove any additional draw_final_score calls here
 
-      INC scene
-      LDA #0
-      STA start_text_drawn
+    LDA controller_1
+    AND #PAD_START
+    BEQ scene_done
 
-    not_scene_0:
+    ; Restart game on START press
+    JSR init_gamedata
+    LDA #0
+    STA game_over_drawn_flag  ; reset flag for next game over
 
-    ; Scene 1+ gameplay already updated by update_player etc.
-
+scene_done:
     JMP forever
 
 .endproc
@@ -1253,6 +1440,12 @@ start_txt:
 
 title_txt:
 .byte 'R', 'O', 'C', 'K', 'E', 'T' ,'O', 'C', 'K', 'Y', '!', 0
+
+score_txt:
+.byte 'S', 'C', 'O', 'R', 'E', ':', 0
+
+score_final_txt:
+.byte 'F', 'I', 'N', 'A', 'L', ' ', 'S', 'C', 'O', 'R', 'E', ':', 0
 
 
 
