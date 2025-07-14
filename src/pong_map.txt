@@ -1,0 +1,40 @@
+Modules list:
+-------------
+pong.o:
+    CODE              Offs=000000  Size=0002D9  Align=00001  Fill=0000
+    RODATA            Offs=000000  Size=000450  Align=00001  Fill=0000
+    ZEROPAGE          Offs=000000  Size=00003B  Align=00001  Fill=0000
+    HEADER            Offs=000000  Size=000008  Align=00001  Fill=0000
+    VECTORS           Offs=000000  Size=000006  Align=00001  Fill=0000
+    OAM               Offs=000000  Size=000100  Align=00001  Fill=0000
+    CHARS             Offs=000000  Size=002000  Align=00001  Fill=0000
+
+
+Segment list:
+-------------
+Name                   Start     End    Size  Align
+----------------------------------------------------
+CHARS                 000000  001FFF  002000  00001
+HEADER                000000  000007  000008  00001
+ZEROPAGE              000000  00003A  00003B  00001
+OAM                   000200  0002FF  000100  00001
+CODE                  008000  0082D8  0002D9  00001
+RODATA                0082D9  008728  000450  00001
+VECTORS               00FFFA  00FFFF  000006  00001
+
+
+Exports list by name:
+---------------------
+__STACKSIZE__             000300 REA    
+
+
+Exports list by value:
+----------------------
+__STACKSIZE__             000300 REA    
+
+
+Imports list:
+-------------
+__STACKSIZE__ ([linker generated]):
+    [linker generated]        C:\Users\chase\Desktop\Workspace\School\Neumont Classes\Year3\Game Engine Projects\NES\Projects\cc65\cfg/nes.cfg:29
+
